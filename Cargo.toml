@@ -1,0 +1,11 @@
+[package]
+name = "zrs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+x11 = "2.18"
+image = "0.24"
+sdl2 = "0.35"
+scrap = "0.5.0"
+libc = "0.2.166"
