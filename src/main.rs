@@ -45,11 +45,11 @@ fn main() {
         xshape::XShapeCombineMask(
             display,
             zoom_window,
-            xshape::ShapeBounding,
+            xshape::SHAPE_BOUNDING,
             0,
             0,
             circular_mask,
-            xshape::ShapeSet,
+            xshape::SHAPE_SET,
         );
     }
 

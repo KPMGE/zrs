@@ -14,14 +14,8 @@ extern "C" {
     );
 }
 
-pub const ShapeBounding: c_int = 0;
-pub const ShapeClip: c_int = 1;
-pub const ShapeInput: c_int = 2;
-pub const ShapeSet: c_int = 0;
-pub const ShapeUnion: c_int = 1;
-pub const ShapeIntersect: c_int = 2;
-pub const ShapeSubtract: c_int = 3;
-pub const ShapeInvert: c_int = 4;
+pub const SHAPE_BOUNDING: c_int = 0;
+pub const SHAPE_SET: c_int = 0;
 
 pub fn create_circular_mask(
     display: *mut xlib::Display,
