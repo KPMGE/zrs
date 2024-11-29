@@ -24,10 +24,6 @@ fn main() {
         );
     }
 
-    let zoom_factor = 2;
-    let zoom_width = gwa.width / zoom_factor;
-    let zoom_height = gwa.height / zoom_factor;
-
     let zoom_window = unsafe {
         xlib::XCreateSimpleWindow(
             display,
@@ -90,13 +86,15 @@ fn main() {
             );
         }
 
-        // Calculate the capture area centered on the mouse
-        let mut start_x = mouse_x - zoom_width / 2;
-        let mut start_y = mouse_y - zoom_height / 2;
+        let zoom_factor = 2;
+        let capture_width = (ZOOM_WINDOW_WIDTH as i32 / zoom_factor).min(gwa.width);
+        let capture_height = (ZOOM_WINDOW_HEIGHT as i32 / zoom_factor).min(gwa.height);
 
-        // Clamp coordinates to ensure they stay within screen bounds
-        start_x = start_x.clamp(0, gwa.width - zoom_width);
-        start_y = start_y.clamp(0, gwa.height - zoom_height);
+        let mut start_x = mouse_x - capture_width / 2;
+        let mut start_y = mouse_y - capture_height / 2;
+
+        start_x = start_x.clamp(0, gwa.width - capture_width);
+        start_y = start_y.clamp(0, gwa.height - capture_height);
 
         // Capture the desktop image
         let desktop_image = unsafe {
@@ -105,8 +103,8 @@ fn main() {
                 root,
                 start_x,
                 start_y,
-                zoom_width.try_into().unwrap(),
-                zoom_height.try_into().unwrap(),
+                capture_width.try_into().unwrap(),
+                capture_height.try_into().unwrap(),
                 xlib::XAllPlanes(),
                 xlib::ZPixmap,
             )
@@ -116,14 +114,14 @@ fn main() {
             panic!("Failed to capture desktop image\n");
         }
 
-        // Scale the image
+        // Scale the captured region to fit the zoom window
         let zoomed_image = scale_image(
             display,
             gwa.visual,
             gwa.depth,
             desktop_image,
-            gwa.width,
-            gwa.height,
+            ZOOM_WINDOW_WIDTH as i32,
+            ZOOM_WINDOW_HEIGHT as i32,
         );
 
         // Display the zoomed image in the window
@@ -137,8 +135,8 @@ fn main() {
                 0,
                 0,
                 0,
-                gwa.width as u32,
-                gwa.height as u32,
+                ZOOM_WINDOW_WIDTH,
+                ZOOM_WINDOW_HEIGHT,
             )
         };
 
@@ -153,16 +151,17 @@ fn main() {
         }
 
         // Cleanup
-        unsafe { xlib::XDestroyImage(desktop_image) };
-        unsafe { xlib::XDestroyImage(zoomed_image) };
-        unsafe { xlib::XFlush(display) };
+        unsafe {
+            xlib::XDestroyImage(desktop_image);
+            xlib::XDestroyImage(zoomed_image);
+            xlib::XFlush(display);
+        };
 
         // small delay for smoother updates (adjust as needed)
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::thread::sleep(std::time::Duration::from_millis(300));
     }
 }
 
-// function to scale an XImage (naive implementation)
 fn scale_image(
     display: *mut xlib::Display,
     visual: *mut xlib::Visual,
@@ -199,8 +198,10 @@ fn scale_image(
 
     for y in 0..new_height {
         for x in 0..new_width {
-            let src_x = x * unsafe { (*src_image).width } / new_width;
-            let src_y = y * unsafe { (*src_image).height } / new_height;
+            let src_x = (x * unsafe { (*src_image).width } / new_width)
+                .min(unsafe { (*src_image).width - 1 });
+            let src_y = (y * unsafe { (*src_image).height } / new_height)
+                .min(unsafe { (*src_image).height - 1 });
 
             let pixel = unsafe { xlib::XGetPixel(src_image, src_x, src_y) };
             unsafe { xlib::XPutPixel(scaled_image, x, y, pixel) };
