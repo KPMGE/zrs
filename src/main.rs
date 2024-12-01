@@ -87,6 +87,7 @@ fn main() {
         }
 
         let zoom_factor = 2;
+
         let capture_width = (ZOOM_WINDOW_WIDTH as i32 / zoom_factor).min(gwa.width);
         let capture_height = (ZOOM_WINDOW_HEIGHT as i32 / zoom_factor).min(gwa.height);
 
@@ -114,7 +115,7 @@ fn main() {
             panic!("Failed to capture desktop image\n");
         }
 
-        // Scale the captured region to fit the zoom window
+        // // Scale the captured region to fit the zoom window
         let zoomed_image = scale_image(
             display,
             gwa.visual,
@@ -145,8 +146,8 @@ fn main() {
             xlib::XMoveWindow(
                 display,
                 zoom_window,
-                mouse_x - ZOOM_WINDOW_WIDTH as i32 / 2,
-                mouse_y - ZOOM_WINDOW_HEIGHT as i32 / 2,
+                mouse_x - ZOOM_WINDOW_WIDTH as i32,
+                mouse_y - ZOOM_WINDOW_HEIGHT as i32,
             );
         }
 
@@ -158,7 +159,7 @@ fn main() {
         };
 
         // small delay for smoother updates (adjust as needed)
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
 
