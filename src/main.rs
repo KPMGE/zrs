@@ -136,8 +136,8 @@ fn main() {
         };
 
         // Move window according to the mouse position
-        let mut window_x = mouse_x - (ZOOM_WINDOW_WIDTH as i32 + 20);
-        let mut window_y = mouse_y - (ZOOM_WINDOW_HEIGHT as i32 + 20);
+        let mut window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
+        let mut window_y = mouse_y - ZOOM_WINDOW_HEIGHT as i32;
 
         if mouse_y - ZOOM_WINDOW_HEIGHT as i32 <= 0 {
             window_y = mouse_y;
