@@ -2,6 +2,7 @@ const ZOOM_WINDOW_WIDTH: u32 = 200;
 const ZOOM_WINDOW_HEIGHT: u32 = 150;
 
 mod xshape;
+use std::sync::{atomic, Arc};
 use x11::xlib;
 
 fn main() {
@@ -63,7 +64,101 @@ fn main() {
         )
     };
 
+    // Grab the Escape key
+    unsafe {
+        xlib::XGrabKey(
+            display,
+            xlib::XKeysymToKeycode(display, x11::keysym::XK_Escape as u64) as i32,
+            0, // No modifier
+            root,
+            1, // OwnerEvents: true
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+        );
+    }
+
+    // Attempt to grab the pointer
+    let grab_status = unsafe {
+        xlib::XGrabPointer(
+            display,
+            root,                         // Grab the root window
+            xlib::False,                  // Don't allow other applications to use the pointer
+            xlib::ButtonPressMask as u32, // Events to listen for
+            xlib::GrabModeAsync,          // Asynchronous mode for pointer
+            xlib::GrabModeAsync,          // Asynchronous mode for keyboard
+            root,                         // Confine pointer to root (entire screen)
+            0,                            // No custom cursor
+            xlib::CurrentTime,            // Current time
+        )
+    };
+
+    if grab_status != xlib::GrabSuccess {
+        panic!("Failed to grab pointer!");
+    }
+
+    println!("Pointer successfully grabbed.");
+
+    let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
+
+    let zoom_factor_clone = zoom_factor.clone();
+
+    // Spawn a thread to process events
+    std::thread::spawn(move || {
+        while let Ok(event) = rx.recv() {
+            match event {
+                4 => {
+                    println!("Mouse wheel scrolled up");
+                    let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
+                    let new = (previous + 1).clamp(1, 10);
+                    zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
+                }
+                5 => {
+                    println!("Mouse wheel scrolled down");
+                    let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
+                    let new = (previous - 1).clamp(1, 10);
+                    zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
+                }
+                6 => println!("Mouse wheel scrolled left"),
+                7 => println!("Mouse wheel scrolled right"),
+                _ => println!("Other mouse button pressed: {}", event),
+            }
+        }
+    });
+
     loop {
+        let pending_events = unsafe { xlib::XPending(display) };
+
+        if pending_events > 0 {
+            unsafe {
+                xlib::XNextEvent(display, &mut event);
+            }
+
+            match event.get_type() {
+                xlib::KeyPress => {
+                    let key_event = unsafe { event.key };
+                    let keysym =
+                        unsafe { xlib::XKeycodeToKeysym(display, key_event.keycode as _, 0) };
+
+                    if keysym == x11::keysym::XK_Escape as u64 {
+                        println!("Escape key pressed. Exiting...");
+                        unsafe { xlib::XCloseDisplay(display) };
+                        std::process::exit(0);
+                    }
+                }
+                xlib::ButtonPress => {
+                    let button_event = unsafe { event.button };
+                    if let Err(_) = tx.send(button_event.button) {
+                        break; // Exit if the receiver thread is closed
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let mut mouse_x = 0;
         let mut mouse_y = 0;
         let mut root_return = 0;
@@ -86,10 +181,10 @@ fn main() {
             );
         }
 
-        let zoom_factor = 2;
-
-        let capture_width = (ZOOM_WINDOW_WIDTH as i32 / zoom_factor).min(gwa.width);
-        let capture_height = (ZOOM_WINDOW_HEIGHT as i32 / zoom_factor).min(gwa.height);
+        let factor = zoom_factor.load(atomic::Ordering::SeqCst) as i32;
+        println!("Current zoom factor: {}", factor);
+        let capture_width = (ZOOM_WINDOW_WIDTH as i32 / factor).min(gwa.width);
+        let capture_height = (ZOOM_WINDOW_HEIGHT as i32 / factor).min(gwa.height);
 
         let mut start_x = mouse_x - capture_width / 2;
         let mut start_y = mouse_y - capture_height / 2;
