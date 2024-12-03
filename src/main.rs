@@ -9,20 +9,19 @@ fn main() {
     let display = unsafe { xlib::XOpenDisplay(std::ptr::null()) };
 
     if display.is_null() {
-        panic!("Cannot open X display!");
+        panic!("ERROR: Cannot open X display!");
     }
 
     let root = unsafe { xlib::XDefaultRootWindow(display) };
+    if root == 0 {
+        panic!("ERROR: Failed create deafault root window!");
+    }
+
     let mut gwa: xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
     let status = unsafe { xlib::XGetWindowAttributes(display, root, &mut gwa) };
 
     if status == 0 {
-        eprintln!("Error: Failed to get window attributes.");
-    } else {
-        println!(
-            "Window attributes retrieved: width = {}, height = {}",
-            gwa.width, gwa.height
-        );
+        panic!("ERROR: Failed to get window attributes!");
     }
 
     let zoom_window = unsafe {
@@ -54,7 +53,11 @@ fn main() {
         );
     }
 
-    unsafe { xlib::XMapWindow(display, zoom_window) };
+    let status = unsafe { xlib::XMapWindow(display, zoom_window) };
+    if status == 0 {
+        panic!("ERROR: Cannot map window!");
+    }
+
     let gc = unsafe {
         xlib::XCreateGC(
             display,
@@ -65,66 +68,61 @@ fn main() {
     };
 
     // Grab the Escape key
-    unsafe {
+    let status = unsafe {
         xlib::XGrabKey(
             display,
             xlib::XKeysymToKeycode(display, x11::keysym::XK_Escape as u64) as i32,
-            0, // No modifier
+            0,
             root,
-            1, // OwnerEvents: true
+            1,
             xlib::GrabModeAsync,
             xlib::GrabModeAsync,
-        );
-    }
-
-    // Attempt to grab the pointer
-    let grab_status = unsafe {
-        xlib::XGrabPointer(
-            display,
-            root,                         // Grab the root window
-            xlib::False,                  // Don't allow other applications to use the pointer
-            xlib::ButtonPressMask as u32, // Events to listen for
-            xlib::GrabModeAsync,          // Asynchronous mode for pointer
-            xlib::GrabModeAsync,          // Asynchronous mode for keyboard
-            root,                         // Confine pointer to root (entire screen)
-            0,                            // No custom cursor
-            xlib::CurrentTime,            // Current time
         )
     };
 
-    if grab_status != xlib::GrabSuccess {
+    if status == 0 {
+        panic!("ERROR: Cannot gray ESC key!");
+    }
+
+    // Attempt to grab the pointer
+    let status = unsafe {
+        xlib::XGrabPointer(
+            display,
+            root,
+            xlib::False,
+            xlib::ButtonPressMask as u32,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+            root,
+            0,
+            xlib::CurrentTime,
+        )
+    };
+
+    if status != xlib::GrabSuccess {
         panic!("Failed to grab pointer!");
     }
 
-    println!("Pointer successfully grabbed.");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
+    let zoom_factor_clone = zoom_factor.clone();
 
     let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
 
-    let (tx, rx) = std::sync::mpsc::channel();
-
-    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
-
-    let zoom_factor_clone = zoom_factor.clone();
-
-    // Spawn a thread to process events
     std::thread::spawn(move || {
         while let Ok(event) = rx.recv() {
             match event {
                 4 => {
-                    println!("Mouse wheel scrolled up");
                     let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
                     let new = (previous + 1).clamp(1, 10);
                     zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
                 }
                 5 => {
-                    println!("Mouse wheel scrolled down");
                     let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
                     let new = (previous - 1).clamp(1, 10);
                     zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
                 }
-                6 => println!("Mouse wheel scrolled left"),
-                7 => println!("Mouse wheel scrolled right"),
-                _ => println!("Other mouse button pressed: {}", event),
+                _ => {}
             }
         }
     });
@@ -133,9 +131,7 @@ fn main() {
         let pending_events = unsafe { xlib::XPending(display) };
 
         if pending_events > 0 {
-            unsafe {
-                xlib::XNextEvent(display, &mut event);
-            }
+            unsafe { xlib::XNextEvent(display, &mut event) };
 
             match event.get_type() {
                 xlib::KeyPress => {
@@ -152,7 +148,7 @@ fn main() {
                 xlib::ButtonPress => {
                     let button_event = unsafe { event.button };
                     if let Err(_) = tx.send(button_event.button) {
-                        break; // Exit if the receiver thread is closed
+                        break;
                     }
                 }
                 _ => {}
@@ -167,7 +163,7 @@ fn main() {
         let mut win_y = 0;
         let mut mask_return = 0;
 
-        unsafe {
+        let status = unsafe {
             xlib::XQueryPointer(
                 display,
                 root,
@@ -178,11 +174,14 @@ fn main() {
                 &mut win_x,
                 &mut win_y,
                 &mut mask_return,
-            );
+            )
+        };
+
+        if status == 0 {
+            panic!("ERROR: Cannot query pointer!");
         }
 
         let factor = zoom_factor.load(atomic::Ordering::SeqCst) as i32;
-        println!("Current zoom factor: {}", factor);
         let capture_width = (ZOOM_WINDOW_WIDTH as i32 / factor).min(gwa.width);
         let capture_height = (ZOOM_WINDOW_HEIGHT as i32 / factor).min(gwa.height);
 
@@ -237,8 +236,8 @@ fn main() {
         };
 
         // Move window according to the mouse position
-        let mut window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
-        let mut window_y = mouse_y - ZOOM_WINDOW_HEIGHT as i32;
+        let mut window_x = mouse_x - (ZOOM_WINDOW_WIDTH as i32 + 20);
+        let mut window_y = mouse_y - (ZOOM_WINDOW_HEIGHT as i32 + 20);
 
         if mouse_y - ZOOM_WINDOW_HEIGHT as i32 <= 0 {
             window_y = mouse_y;
@@ -252,6 +251,7 @@ fn main() {
             window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
         }
 
+        // Move window according to mouse position
         unsafe {
             xlib::XMoveWindow(display, zoom_window, window_x, window_y);
         }
@@ -263,7 +263,6 @@ fn main() {
             xlib::XFlush(display);
         };
 
-        // small delay for smoother updates (adjust as needed)
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
