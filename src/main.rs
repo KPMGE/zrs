@@ -1,5 +1,6 @@
-const ZOOM_WINDOW_WIDTH: u32 = 200;
-const ZOOM_WINDOW_HEIGHT: u32 = 150;
+const ZOOM_WINDOW_WIDTH: u32 = 250;
+const ZOOM_WINDOW_HEIGHT: u32 = 200;
+const DEFAULT_ZOOM_FACTOR: i8 = 2;
 
 mod events;
 mod setup;
@@ -31,7 +32,7 @@ fn main() {
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
-    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
+    let zoom_factor = Arc::new(atomic::AtomicI8::new(DEFAULT_ZOOM_FACTOR));
     let zoom_factor_clone = zoom_factor.clone();
 
     let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
@@ -136,8 +137,8 @@ fn main() {
         };
 
         // Move window according to the mouse position
-        let mut window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
-        let mut window_y = mouse_y - ZOOM_WINDOW_HEIGHT as i32;
+        let mut window_x = mouse_x - (ZOOM_WINDOW_WIDTH as f32 * 1.2) as i32;
+        let mut window_y = mouse_y - (ZOOM_WINDOW_HEIGHT as f32 * 1.2) as i32;
 
         if mouse_y - ZOOM_WINDOW_HEIGHT as i32 <= 0 {
             window_y = mouse_y;
@@ -148,7 +149,7 @@ fn main() {
         }
 
         if mouse_x + ZOOM_WINDOW_WIDTH as i32 >= gwa.width {
-            window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
+            window_x = mouse_x - (ZOOM_WINDOW_WIDTH as f32 * 1.2) as i32;
         }
 
         // Move window according to mouse position

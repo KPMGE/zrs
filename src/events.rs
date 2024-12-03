@@ -2,18 +2,19 @@ use std::sync::{atomic, mpsc, Arc};
 use x11::xlib;
 
 const MAX_ZOOM_FACTOR: i8 = 20;
+const MIN_ZOOM_FACTOR: i8 = 1;
 
 pub fn handle_zoom_mouse_events(rx: mpsc::Receiver<u32>, zoom_factor: Arc<atomic::AtomicI8>) {
     while let Ok(event) = rx.recv() {
         match event {
             4 => {
                 let previous = zoom_factor.load(atomic::Ordering::SeqCst);
-                let new = (previous + 1).clamp(1, MAX_ZOOM_FACTOR);
+                let new = (previous + 1).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
                 zoom_factor.store(new, atomic::Ordering::SeqCst);
             }
             5 => {
                 let previous = zoom_factor.load(atomic::Ordering::SeqCst);
-                let new = (previous - 1).clamp(1, MAX_ZOOM_FACTOR);
+                let new = (previous - 1).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
                 zoom_factor.store(new, atomic::Ordering::SeqCst);
             }
             _ => {}
