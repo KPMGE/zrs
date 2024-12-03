@@ -142,13 +142,23 @@ fn main() {
         };
 
         // Move window according to the mouse position
+        let mut window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
+        let mut window_y = mouse_y - ZOOM_WINDOW_HEIGHT as i32;
+
+        if mouse_y - ZOOM_WINDOW_HEIGHT as i32 <= 0 {
+            window_y = mouse_y;
+        }
+
+        if mouse_x - ZOOM_WINDOW_WIDTH as i32 <= gwa.width {
+            window_x = mouse_x;
+        }
+
+        if mouse_x + ZOOM_WINDOW_WIDTH as i32 >= gwa.width {
+            window_x = mouse_x - ZOOM_WINDOW_WIDTH as i32;
+        }
+
         unsafe {
-            xlib::XMoveWindow(
-                display,
-                zoom_window,
-                mouse_x - ZOOM_WINDOW_WIDTH as i32,
-                mouse_y - ZOOM_WINDOW_HEIGHT as i32,
-            );
+            xlib::XMoveWindow(display, zoom_window, window_x, window_y);
         }
 
         // Cleanup
