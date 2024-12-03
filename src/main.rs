@@ -1,7 +1,11 @@
 const ZOOM_WINDOW_WIDTH: u32 = 200;
 const ZOOM_WINDOW_HEIGHT: u32 = 150;
 
+mod events;
+mod setup;
 mod xshape;
+mod zoom;
+
 use std::sync::{atomic, Arc};
 use x11::xlib;
 
@@ -17,6 +21,8 @@ fn main() {
         panic!("ERROR: Failed create deafault root window!");
     }
 
+    setup::setup_x11_event_handlers(display, root);
+
     let mut gwa: xlib::XWindowAttributes = unsafe { std::mem::zeroed() };
     let status = unsafe { xlib::XGetWindowAttributes(display, root, &mut gwa) };
 
@@ -24,39 +30,18 @@ fn main() {
         panic!("ERROR: Failed to get window attributes!");
     }
 
-    let zoom_window = unsafe {
-        xlib::XCreateSimpleWindow(
-            display,
-            root,
-            0,
-            0,
-            ZOOM_WINDOW_WIDTH,
-            ZOOM_WINDOW_HEIGHT,
-            1,
-            xlib::XBlackPixel(display, 0),
-            xlib::XWhitePixel(display, 0),
-        )
-    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
+    let zoom_factor_clone = zoom_factor.clone();
 
-    let circular_mask =
-        xshape::create_circular_mask(display, root, ZOOM_WINDOW_WIDTH, ZOOM_WINDOW_HEIGHT);
+    let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
 
-    unsafe {
-        xshape::XShapeCombineMask(
-            display,
-            zoom_window,
-            xshape::SHAPE_BOUNDING,
-            0,
-            0,
-            circular_mask,
-            xshape::SHAPE_SET,
-        );
-    }
+    std::thread::spawn(move || {
+        events::handle_zoom_mouse_events(rx, zoom_factor_clone);
+    });
 
-    let status = unsafe { xlib::XMapWindow(display, zoom_window) };
-    if status == 0 {
-        panic!("ERROR: Cannot map window!");
-    }
+    let zoom_window =
+        zoom::create_zoom_window(display, root, ZOOM_WINDOW_WIDTH, ZOOM_WINDOW_HEIGHT);
 
     let gc = unsafe {
         xlib::XCreateGC(
@@ -67,93 +52,8 @@ fn main() {
         )
     };
 
-    // Grab the Escape key
-    let status = unsafe {
-        xlib::XGrabKey(
-            display,
-            xlib::XKeysymToKeycode(display, x11::keysym::XK_Escape as u64) as i32,
-            0,
-            root,
-            1,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-        )
-    };
-
-    if status == 0 {
-        panic!("ERROR: Cannot gray ESC key!");
-    }
-
-    // Attempt to grab the pointer
-    let status = unsafe {
-        xlib::XGrabPointer(
-            display,
-            root,
-            xlib::False,
-            xlib::ButtonPressMask as u32,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-            root,
-            0,
-            xlib::CurrentTime,
-        )
-    };
-
-    if status != xlib::GrabSuccess {
-        panic!("Failed to grab pointer!");
-    }
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    let zoom_factor = Arc::new(atomic::AtomicI8::new(2));
-    let zoom_factor_clone = zoom_factor.clone();
-
-    let mut event: xlib::XEvent = unsafe { std::mem::zeroed() };
-
-    std::thread::spawn(move || {
-        while let Ok(event) = rx.recv() {
-            match event {
-                4 => {
-                    let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
-                    let new = (previous + 1).clamp(1, 10);
-                    zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
-                }
-                5 => {
-                    let previous = zoom_factor_clone.load(atomic::Ordering::SeqCst);
-                    let new = (previous - 1).clamp(1, 10);
-                    zoom_factor_clone.store(new, atomic::Ordering::SeqCst);
-                }
-                _ => {}
-            }
-        }
-    });
-
     loop {
-        let pending_events = unsafe { xlib::XPending(display) };
-
-        if pending_events > 0 {
-            unsafe { xlib::XNextEvent(display, &mut event) };
-
-            match event.get_type() {
-                xlib::KeyPress => {
-                    let key_event = unsafe { event.key };
-                    let keysym =
-                        unsafe { xlib::XKeycodeToKeysym(display, key_event.keycode as _, 0) };
-
-                    if keysym == x11::keysym::XK_Escape as u64 {
-                        println!("Escape key pressed. Exiting...");
-                        unsafe { xlib::XCloseDisplay(display) };
-                        std::process::exit(0);
-                    }
-                }
-                xlib::ButtonPress => {
-                    let button_event = unsafe { event.button };
-                    if let Err(_) = tx.send(button_event.button) {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
+        events::handle_x11_events(display, &mut event, &tx);
 
         let mut mouse_x = 0;
         let mut mouse_y = 0;
@@ -210,7 +110,7 @@ fn main() {
         }
 
         // // Scale the captured region to fit the zoom window
-        let zoomed_image = scale_image(
+        let zoomed_image = zoom::scale_image(
             display,
             gwa.visual,
             gwa.depth,
@@ -265,53 +165,4 @@ fn main() {
 
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
-}
-
-fn scale_image(
-    display: *mut xlib::Display,
-    visual: *mut xlib::Visual,
-    depth: i32,
-    src_image: *mut xlib::XImage,
-    new_width: i32,
-    new_height: i32,
-) -> *mut xlib::XImage {
-    let scaled_image = unsafe {
-        let image_size_in_bytes = new_width * new_height * 4;
-        let data_ptr = libc::malloc(image_size_in_bytes as libc::size_t) as *mut i8;
-
-        if data_ptr.is_null() {
-            panic!("Failed to allocate memory for image data");
-        }
-
-        xlib::XCreateImage(
-            display,
-            visual,
-            depth as u32,
-            xlib::ZPixmap,
-            0,
-            data_ptr,
-            new_width.try_into().unwrap(),
-            new_height.try_into().unwrap(),
-            32,
-            0,
-        )
-    };
-
-    if scaled_image.is_null() {
-        panic!("Failed to create scaled XImage");
-    }
-
-    for y in 0..new_height {
-        for x in 0..new_width {
-            let src_x = (x * unsafe { (*src_image).width } / new_width)
-                .min(unsafe { (*src_image).width - 1 });
-            let src_y = (y * unsafe { (*src_image).height } / new_height)
-                .min(unsafe { (*src_image).height - 1 });
-
-            let pixel = unsafe { xlib::XGetPixel(src_image, src_x, src_y) };
-            unsafe { xlib::XPutPixel(scaled_image, x, y, pixel) };
-        }
-    }
-
-    scaled_image
 }
